@@ -1,0 +1,519 @@
+---
+alwaysApply: false
+---
+
+# 프론트엔드 프로젝트 구조 및 컴포넌트 설계
+
+## 프로젝트 구조
+
+```
+frontend/
+├── public/
+│   ├── images/
+│   └── fonts/
+├── src/
+│   ├── app/                    # Next.js App Router
+│   │   ├── layout.tsx          # 루트 레이아웃
+│   │   ├── page.tsx            # 홈페이지
+│   │   ├── (dashboard)/        # 대시보드 페이지
+│   │   │   ├── tasks/
+│   │   │   ├── calendar/
+│   │   │   └── settings/
+│   │   └── api/                # API Routes
+│   ├── components/             # React 컴포넌트
+│   │   ├── tasks/
+│   │   ├── calendar/
+│   │   ├── email/
+│   │   ├── notifications/
+│   │   ├── settings/
+│   │   └── common/
+│   ├── hooks/                  # 커스텀 훅
+│   ├── services/               # API 통신
+│   ├── store/                  # 전역 상태 관리
+│   ├── types/                  # TypeScript 타입
+│   ├── utils/                  # 유틸리티 함수
+│   ├── constants/              # 상수
+│   └── styles/                 # 전역 스타일
+├── package.json
+└── tsconfig.json
+```
+
+## 컴포넌트 구조 및 명명 규칙
+
+### 1. 컴포넌트 파일 구조
+
+**단일 컴포넌트**
+
+```
+TaskCard/
+├── TaskCard.tsx          # 컴포넌트 로직
+├── TaskCard.types.ts     # 타입 정의
+└── index.ts              # Re-export
+```
+
+**복잡한 컴포넌트**
+
+```
+Calendar/
+├── Calendar.tsx
+├── Calendar.types.ts
+├── components/           # 하위 컴포넌트
+│   ├── MonthView.tsx
+│   ├── WeekView.tsx
+│   └── DayView.tsx
+├── hooks/                # 전용 훅
+│   └── useCalendarData.ts
+└── index.ts
+```
+
+### 2. 컴포넌트 작성 패턴
+
+**함수형 컴포넌트 (FC 타입 사용 금지)**
+
+```typescript
+// src/components/tasks/TaskCard.tsx
+
+// ❌ 나쁜 예: React.FC 사용
+const TaskCard: React.FC<TaskCardProps> = ({ task }) => {
+  return <div>{task.title}</div>;
+};
+
+// ✅ 좋은 예: 명시적 타입 지정
+interface TaskCardProps {
+  task: Task;
+  onEdit?: (id: string) => void;
+  onDelete?: (id: string) => void;
+}
+
+export function TaskCard({ task, onEdit, onDelete }: TaskCardProps) {
+  return (
+    <div className="rounded-lg border p-4">
+      <h3 className="text-lg font-semibold">{task.title}</h3>
+      <p className="text-sm text-gray-600">{task.description}</p>
+
+      <div className="mt-4 flex gap-2">
+        {onEdit && <button onClick={() => onEdit(task.id)}>수정</button>}
+        {onDelete && <button onClick={() => onDelete(task.id)}>삭제</button>}
+      </div>
+    </div>
+  );
+}
+```
+
+### 3. Props 타입 정의
+
+**Props는 항상 interface로 정의**
+
+```typescript
+// src/components/tasks/TaskList.types.ts
+
+import { Task } from "@/types";
+
+export interface TaskListProps {
+  tasks: Task[];
+  loading?: boolean;
+  error?: string | null;
+  onTaskClick?: (task: Task) => void;
+  onTaskEdit?: (taskId: string) => void;
+  onTaskDelete?: (taskId: string) => void;
+}
+
+export interface TaskFilterProps {
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  searchQuery?: string;
+  onFilterChange: (filters: TaskFilters) => void;
+}
+```
+
+### 4. 컴포넌트 구성 순서
+
+```typescript
+// 1. Import 문
+import { useState, useEffect } from "react";
+import { Task } from "@/types";
+import { Button } from "@/components/common";
+import { useTasks } from "@/hooks/useTasks";
+
+// 2. 타입 정의
+interface TaskListProps {
+  userId: string;
+}
+
+// 3. 컴포넌트 함수
+export function TaskList({ userId }: TaskListProps) {
+  // 3-1. 상태 (useState)
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // 3-2. 커스텀 훅
+  const { tasks, loading, error, refetch } = useTasks(userId);
+
+  // 3-3. useEffect
+  useEffect(() => {
+    refetch();
+  }, [userId]);
+
+  // 3-4. 이벤트 핸들러
+  const handleTaskClick = (task: Task) => {
+    setSelectedTask(task);
+    setIsModalOpen(true);
+  };
+
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    setSelectedTask(null);
+  };
+
+  // 3-5. 조건부 렌더링 (early return)
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorMessage message={error} />;
+  if (tasks.length === 0) return <EmptyState />;
+
+  // 3-6. JSX 반환
+  return (
+    <div className="space-y-4">
+      {tasks.map((task) => (
+        <TaskCard
+          key={task.id}
+          task={task}
+          onClick={() => handleTaskClick(task)}
+        />
+      ))}
+
+      {isModalOpen && selectedTask && (
+        <TaskModal task={selectedTask} onClose={handleModalClose} />
+      )}
+    </div>
+  );
+}
+
+// 4. 하위 컴포넌트 (필요한 경우)
+function EmptyState() {
+  return (
+    <div className="text-center py-12">
+      <p className="text-gray-500">할일이 없습니다</p>
+    </div>
+  );
+}
+```
+
+## 폴더별 명명 규칙
+
+### Pages (App Router)
+
+- 파일명: `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`
+- 폴더명: 케밥 케이스 (kebab-case)
+
+```
+app/
+├── (dashboard)/
+│   ├── tasks/
+│   │   ├── page.tsx              # /tasks
+│   │   ├── [id]/
+│   │   │   └── page.tsx          # /tasks/[id]
+│   │   └── new/
+│   │       └── page.tsx          # /tasks/new
+│   └── calendar/
+│       ├── page.tsx              # /calendar
+│       ├── month/
+│       │   └── page.tsx          # /calendar/month
+│       └── week/
+│           └── page.tsx          # /calendar/week
+```
+
+### Components
+
+- 파일명: 파스칼 케이스 (PascalCase)
+- 폴더명: 파스칼 케이스
+
+```
+components/
+├── tasks/
+│   ├── TaskList.tsx
+│   ├── TaskCard.tsx
+│   ├── TaskModal.tsx
+│   └── TaskFilter.tsx
+├── common/
+│   ├── Button.tsx
+│   ├── Modal.tsx
+│   └── Input.tsx
+```
+
+### Hooks
+
+- 파일명: camelCase, `use` 접두사 필수
+
+```
+hooks/
+├── useAuth.ts
+├── useTasks.ts
+├── useCalendar.ts
+└── useNotification.ts
+```
+
+### Services
+
+- 파일명: camelCase, `.service.ts` 접미사
+
+```
+services/
+├── api.service.ts
+├── taskApi.service.ts
+├── calendarApi.service.ts
+└── emailApi.service.ts
+```
+
+## 컴포넌트 분리 원칙
+
+### 1. 단일 책임 원칙
+
+**❌ 나쁜 예: 하나의 컴포넌트가 너무 많은 역할**
+
+```typescript
+function TaskPage() {
+  const [tasks, setTasks] = useState([]);
+  const [filter, setFilter] = useState({});
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState(null);
+
+  // 100+ 줄의 로직...
+
+  return (
+    <div>
+      {/* 필터 UI */}
+      {/* 할일 목록 */}
+      {/* 페이지네이션 */}
+      {/* 모달 */}
+    </div>
+  );
+}
+```
+
+**✅ 좋은 예: 역할별로 분리**
+
+```typescript
+// src/app/(dashboard)/tasks/page.tsx
+export default function TasksPage() {
+  return (
+    <div className="container mx-auto py-6">
+      <TaskFilter />
+      <TaskList />
+      <TaskPagination />
+    </div>
+  );
+}
+
+// src/components/tasks/TaskList.tsx
+export function TaskList() {
+  const { tasks, loading, error } = useTasks();
+
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorMessage message={error} />;
+
+  return (
+    <div className="grid gap-4">
+      {tasks.map((task) => (
+        <TaskCard key={task.id} task={task} />
+      ))}
+    </div>
+  );
+}
+```
+
+### 2. Container/Presenter 패턴
+
+**Container (로직 담당)**
+
+```typescript
+// src/components/tasks/TaskListContainer.tsx
+export function TaskListContainer() {
+  const { tasks, loading, error, updateTask, deleteTask } = useTasks();
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
+  const handleEdit = async (taskId: string, data: UpdateTaskDto) => {
+    await updateTask(taskId, data);
+    setSelectedTask(null);
+  };
+
+  const handleDelete = async (taskId: string) => {
+    if (confirm("정말 삭제하시겠습니까?")) {
+      await deleteTask(taskId);
+    }
+  };
+
+  return (
+    <TaskListPresenter
+      tasks={tasks}
+      loading={loading}
+      error={error}
+      selectedTask={selectedTask}
+      onTaskSelect={setSelectedTask}
+      onTaskEdit={handleEdit}
+      onTaskDelete={handleDelete}
+    />
+  );
+}
+```
+
+**Presenter (UI 담당)**
+
+```typescript
+// src/components/tasks/TaskListPresenter.tsx
+interface TaskListPresenterProps {
+  tasks: Task[];
+  loading: boolean;
+  error: string | null;
+  selectedTask: Task | null;
+  onTaskSelect: (task: Task) => void;
+  onTaskEdit: (taskId: string, data: UpdateTaskDto) => void;
+  onTaskDelete: (taskId: string) => void;
+}
+
+export function TaskListPresenter({
+  tasks,
+  loading,
+  error,
+  selectedTask,
+  onTaskSelect,
+  onTaskEdit,
+  onTaskDelete,
+}: TaskListPresenterProps) {
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorMessage message={error} />;
+
+  return (
+    <div className="space-y-4">
+      {tasks.map((task) => (
+        <TaskCard
+          key={task.id}
+          task={task}
+          onClick={() => onTaskSelect(task)}
+          onEdit={() => onTaskEdit(task.id, {})}
+          onDelete={() => onTaskDelete(task.id)}
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+## 파일 Import 순서
+
+```typescript
+// 1. React 및 Next.js
+import { useState, useEffect } from "react";
+import { useRouter, usePathname } from "next/navigation";
+import Image from "next/image";
+import Link from "next/link";
+
+// 2. 외부 라이브러리
+import { format } from "date-fns";
+import clsx from "clsx";
+
+// 3. 내부 컴포넌트 (절대 경로 사용)
+import { Button, Modal, Input } from "@/components/common";
+import { TaskCard } from "@/components/tasks";
+
+// 4. 훅
+import { useTasks } from "@/hooks/useTasks";
+import { useAuth } from "@/hooks/useAuth";
+
+// 5. 타입
+import type { Task, TaskStatus } from "@/types";
+
+// 6. 유틸리티
+import { formatDate, cn } from "@/utils";
+
+// 7. 상수
+import { TASK_STATUS, TASK_PRIORITY } from "@/constants";
+
+// 8. 스타일 (필요한 경우)
+import styles from "./TaskList.module.css";
+```
+
+## 절대 경로 설정 (tsconfig.json)
+
+```json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@/components/*": ["./src/components/*"],
+      "@/hooks/*": ["./src/hooks/*"],
+      "@/services/*": ["./src/services/*"],
+      "@/store/*": ["./src/store/*"],
+      "@/types/*": ["./src/types/*"],
+      "@/utils/*": ["./src/utils/*"],
+      "@/constants/*": ["./src/constants/*"]
+    }
+  }
+}
+```
+
+## 환경 변수 관리
+
+### .env.local
+
+```env
+# API
+NEXT_PUBLIC_API_URL=http://localhost:3001/api
+NEXT_PUBLIC_WS_URL=ws://localhost:3001
+
+# OAuth
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-client-id
+NEXT_PUBLIC_MICROSOFT_CLIENT_ID=your-client-id
+
+# 기타
+NEXT_PUBLIC_APP_ENV=development
+```
+
+### 사용 방법
+
+```typescript
+// src/config/env.config.ts
+export const env = {
+  apiUrl: process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api",
+  wsUrl: process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001",
+  googleClientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "",
+  appEnv: process.env.NEXT_PUBLIC_APP_ENV || "development",
+};
+
+// 사용 예제
+import { env } from "@/config/env.config";
+
+const response = await fetch(`${env.apiUrl}/tasks`);
+```
+
+## Git 커밋 메시지 규칙
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+### Type
+
+- `feat`: 새로운 기능
+- `fix`: 버그 수정
+- `style`: UI/스타일 변경
+- `refactor`: 리팩토링
+- `test`: 테스트 추가/수정
+- `docs`: 문서 수정
+- `chore`: 빌드, 설정 변경
+
+### 예제
+
+```
+feat(tasks): 할일 필터링 기능 추가
+
+- TaskFilter 컴포넌트 구현
+- 상태, 우선순위, 날짜 범위로 필터링 가능
+- URL 쿼리 파라미터와 동기화
+
+Closes #45
+```

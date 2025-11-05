@@ -1,0 +1,262 @@
+---
+alwaysApply: false
+---
+
+    priority: "MEDIUM",
+
+});
+
+const createTask = useCreateTask();
+
+const handleSubmit = async (e: React.FormEvent) => {
+e.preventDefault();
+
+    try {
+      await createTask.mutateAsync(formData);
+      onSuccess?.();
+
+      // 폼 초기화
+      setFormData({ title: "", description: "", priority: "MEDIUM" });
+    } catch (error) {
+      alert("할일 생성에 실패했습니다");
+    }
+
+};
+
+return (
+<form onSubmit={handleSubmit} className="space-y-4">
+<input
+type="text"
+value={formData.title}
+onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+placeholder="할일 제목"
+required
+/>
+
+      <textarea
+        value={formData.description}
+        onChange={(e) =>
+          setFormData({ ...formData, description: e.target.value })
+        }
+        placeholder="설명 (선택)"
+      />
+
+      <button
+        type="submit"
+        disabled={createTask.isPending}
+        className="btn-primary"
+      >
+        {createTask.isPending ? "생성 중..." : "할일 추가"}
+      </button>
+    </form>
+
+);
+}
+
+````
+
+## Infinite Query (무한 스크롤)
+
+```typescript
+// src/hooks/queries/useInfiniteTasks.ts
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { taskApi } from "@/services/taskApi.service";
+
+export function useInfiniteTasks() {
+  return useInfiniteQuery({
+    queryKey: ["tasks", "infinite"],
+    queryFn: async ({ pageParam = 1 }) => {
+      const response = await taskApi.listTasksPaginated({
+        page: pageParam,
+        pageSize: 20,
+      });
+      return response;
+    },
+    getNextPageParam: (lastPage) => {
+      if (lastPage.pagination.page < lastPage.pagination.totalPages) {
+        return lastPage.pagination.page + 1;
+      }
+      return undefined;
+    },
+    initialPageParam: 1,
+  });
+}
+
+// 컴포넌트에서 사용
+export function InfiniteTaskList() {
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
+    useInfiniteTasks();
+
+  if (isLoading) return <LoadingSpinner />;
+
+  return (
+    <div>
+      {data?.pages.map((page, i) => (
+        <div key={i}>
+          {page.data.map((task) => (
+            <TaskCard key={task.id} task={task} />
+          ))}
+        </div>
+      ))}
+
+      {hasNextPage && (
+        <button
+          onClick={() => fetchNextPage()}
+          disabled={isFetchingNextPage}
+          className="btn-secondary"
+        >
+          {isFetchingNextPage ? "로딩 중..." : "더 보기"}
+        </button>
+      )}
+    </div>
+  );
+}
+````
+
+## WebSocket 실시간 통신
+
+```typescript
+// src/services/websocket.service.ts
+import { env } from "@/config/env.config";
+
+type MessageHandler = (data: any) => void;
+
+class WebSocketService {
+  private ws: WebSocket | null = null;
+  private handlers: Map<string, Set<MessageHandler>> = new Map();
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+
+  connect(token: string) {
+    if (this.ws?.readyState === WebSocket.OPEN) return;
+
+    this.ws = new WebSocket(`${env.wsUrl}?token=${token}`);
+
+    this.ws.onopen = () => {
+      console.log("WebSocket connected");
+      this.reconnectAttempts = 0;
+    };
+
+    this.ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      this.handleMessage(message);
+    };
+
+    this.ws.onclose = () => {
+      console.log("WebSocket disconnected");
+      this.reconnect(token);
+    };
+
+    this.ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+    };
+  }
+
+  disconnect() {
+    this.ws?.close();
+    this.ws = null;
+  }
+
+  private reconnect(token: string) {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error("Max reconnect attempts reached");
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 30000);
+
+    setTimeout(() => {
+      console.log(`Reconnecting... (${this.reconnectAttempts})`);
+      this.connect(token);
+    }, delay);
+  }
+
+  private handleMessage(message: any) {
+    const { type, data } = message;
+    const handlers = this.handlers.get(type);
+
+    if (handlers) {
+      handlers.forEach((handler) => handler(data));
+    }
+  }
+
+  on(event: string, handler: MessageHandler) {
+    if (!this.handlers.has(event)) {
+      this.handlers.set(event, new Set());
+    }
+    this.handlers.get(event)!.add(handler);
+  }
+
+  off(event: string, handler: MessageHandler) {
+    this.handlers.get(event)?.delete(handler);
+  }
+
+  send(type: string, data: any) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type, data }));
+    }
+  }
+}
+
+export const wsService = new WebSocketService();
+```
+
+### WebSocket Hook
+
+```typescript
+// src/hooks/useWebSocket.ts
+import { useEffect } from "react";
+import { wsService } from "@/services/websocket.service";
+
+export function useWebSocket() {
+  useEffect(() => {
+    wsService.connect();
+
+    return () => {
+      wsService.disconnect();
+    };
+  }, []);
+}
+
+// 특정 이벤트 구독
+export function useWebSocketEvent(event: string, handler: (data: any) => void) {
+  useEffect(() => {
+    wsService.on(event, handler);
+
+    return () => {
+      wsService.off(event, handler);
+    };
+  }, [event, handler]);
+}
+```
+
+### 실시간 알림 수신
+
+```typescript
+// src/components/notifications/NotificationCenter.tsx
+"use client";
+
+import { useWebSocketEvent } from "@/hooks/useWebSocket";
+import { useNotificationStore } from "@/store/notificationSlice";
+
+export function NotificationCenter() {
+  const addNotification = useNotificationStore(
+    (state) => state.addNotification
+  );
+
+  useWebSocketEvent("NOTIFICATION", (data) => {
+    addNotification(data);
+
+    // 브라우저 알림 표시
+    if (Notification.permission === "granted") {
+      new Notification(data.title, {
+        body: data.message,
+        icon: "/icon.png",
+      });
+    }
+  });
+
+  return <div>{/* 알림 UI */}</div>;
+}
+```

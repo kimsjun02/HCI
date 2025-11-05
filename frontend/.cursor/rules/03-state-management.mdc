@@ -1,0 +1,524 @@
+# 상태 관리 (Zustand)
+
+## Zustand Store 설계
+
+### 1. Task Store
+
+```typescript
+// src/store/taskSlice.ts
+import { create } from "zustand";
+import { devtools } from "zustand/middleware";
+import type { Task, TaskStatus, TaskPriority } from "@/types";
+
+interface TaskFilters {
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  searchQuery?: string;
+  fromDate?: Date;
+  toDate?: Date;
+}
+
+interface TaskState {
+  tasks: Task[];
+  selectedTask: Task | null;
+  filters: TaskFilters;
+  loading: boolean;
+  error: string | null;
+}
+
+interface TaskActions {
+  setTasks: (tasks: Task[]) => void;
+  addTask: (task: Task) => void;
+  updateTask: (id: string, data: Partial<Task>) => void;
+  deleteTask: (id: string) => void;
+  setSelectedTask: (task: Task | null) => void;
+  setFilters: (filters: Partial<TaskFilters>) => void;
+  clearFilters: () => void;
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+}
+
+type TaskStore = TaskState & TaskActions;
+
+export const useTaskStore = create<TaskStore>()(
+  devtools(
+    (set) => ({
+      // 초기 상태
+      tasks: [],
+      selectedTask: null,
+      filters: {},
+      loading: false,
+      error: null,
+
+      // 액션
+      setTasks: (tasks) => set({ tasks, error: null }),
+
+      addTask: (task) =>
+        set((state) => ({
+          tasks: [task, ...state.tasks],
+        })),
+
+      updateTask: (id, data) =>
+        set((state) => ({
+          tasks: state.tasks.map((task) =>
+            task.id === id ? { ...task, ...data } : task
+          ),
+          selectedTask:
+            state.selectedTask?.id === id
+              ? { ...state.selectedTask, ...data }
+              : state.selectedTask,
+        })),
+
+      deleteTask: (id) =>
+        set((state) => ({
+          tasks: state.tasks.filter((task) => task.id !== id),
+          selectedTask:
+            state.selectedTask?.id === id ? null : state.selectedTask,
+        })),
+
+      setSelectedTask: (task) => set({ selectedTask: task }),
+
+      setFilters: (filters) =>
+        set((state) => ({
+          filters: { ...state.filters, ...filters },
+        })),
+
+      clearFilters: () => set({ filters: {} }),
+
+      setLoading: (loading) => set({ loading }),
+
+      setError: (error) => set({ error }),
+    }),
+    { name: "TaskStore" }
+  )
+);
+```
+
+### 3. UI Store
+
+```typescript
+// src/store/uiSlice.ts
+import { create } from "zustand";
+import { devtools } from "zustand/middleware";
+
+interface ModalState {
+  taskModal: boolean;
+  emailModal: boolean;
+  settingsModal: boolean;
+}
+
+interface UIState {
+  sidebarOpen: boolean;
+  modals: ModalState;
+  theme: "light" | "dark";
+  calendarView: "month" | "week" | "day";
+}
+
+interface UIActions {
+  toggleSidebar: () => void;
+  setSidebarOpen: (open: boolean) => void;
+  openModal: (modal: keyof ModalState) => void;
+  closeModal: (modal: keyof ModalState) => void;
+  toggleTheme: () => void;
+  setCalendarView: (view: "month" | "week" | "day") => void;
+}
+
+type UIStore = UIState & UIActions;
+
+export const useUIStore = create<UIStore>()(
+  devtools(
+    (set) => ({
+      // 초기 상태
+      sidebarOpen: true,
+      modals: {
+        taskModal: false,
+        emailModal: false,
+        settingsModal: false,
+      },
+      theme: "light",
+      calendarView: "month",
+
+      // 액션
+      toggleSidebar: () =>
+        set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+
+      setSidebarOpen: (open) => set({ sidebarOpen: open }),
+
+      openModal: (modal) =>
+        set((state) => ({
+          modals: { ...state.modals, [modal]: true },
+        })),
+
+      closeModal: (modal) =>
+        set((state) => ({
+          modals: { ...state.modals, [modal]: false },
+        })),
+
+      toggleTheme: () =>
+        set((state) => ({
+          theme: state.theme === "light" ? "dark" : "light",
+        })),
+
+      setCalendarView: (view) => set({ calendarView: view }),
+    }),
+    { name: "UIStore" }
+  )
+);
+```
+
+## Store 사용 예제
+
+### 1. 컴포넌트에서 Store 사용
+
+```typescript
+// src/components/tasks/TaskList.tsx
+"use client";
+
+import { useEffect } from "react";
+import { useTaskStore } from "@/store/taskSlice";
+import { taskApi } from "@/services/taskApi.service";
+
+export function TaskList() {
+  // 필요한 상태만 선택적으로 가져오기
+  const tasks = useTaskStore((state) => state.tasks);
+  const loading = useTaskStore((state) => state.loading);
+  const filters = useTaskStore((state) => state.filters);
+
+  // 액션만 가져오기
+  const { setTasks, setLoading, setError, deleteTask } = useTaskStore();
+
+  useEffect(() => {
+    const fetchTasks = async () => {
+      setLoading(true);
+      try {
+        const data = await taskApi.listTasks(filters);
+        setTasks(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "할일 로드 실패");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTasks();
+  }, [filters]);
+
+  const handleDelete = async (taskId: string) => {
+    try {
+      await taskApi.deleteTask(taskId);
+      deleteTask(taskId);
+    } catch (error) {
+      alert("삭제 실패");
+    }
+  };
+
+  if (loading) return <LoadingSpinner />;
+
+  return (
+    <div className="space-y-4">
+      {tasks.map((task) => (
+        <TaskCard
+          key={task.id}
+          task={task}
+          onDelete={() => handleDelete(task.id)}
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+### 2. Shallow Comparison (성능 최적화)
+
+```typescript
+import { shallow } from "zustand/shallow";
+
+// ❌ 나쁜 예: 객체를 반환하면 매번 새로운 참조 생성 -> 리렌더링
+const { tasks, loading } = useTaskStore((state) => ({
+  tasks: state.tasks,
+  loading: state.loading,
+}));
+
+// ✅ 좋은 예: shallow comparison 사용
+const { tasks, loading } = useTaskStore(
+  (state) => ({
+    tasks: state.tasks,
+    loading: state.loading,
+  }),
+  shallow
+);
+
+// 또는 개별적으로 선택
+const tasks = useTaskStore((state) => state.tasks);
+const loading = useTaskStore((state) => state.loading);
+```
+
+### 3. Selector 함수 사용
+
+```typescript
+// src/store/selectors/taskSelectors.ts
+
+// 필터링된 할일 가져오기
+export const selectFilteredTasks = (state: TaskStore) => {
+  const { tasks, filters } = state;
+
+  return tasks.filter((task) => {
+    if (filters.status && task.status !== filters.status) return false;
+    if (filters.priority && task.priority !== filters.priority) return false;
+    if (filters.searchQuery) {
+      const query = filters.searchQuery.toLowerCase();
+      return (
+        task.title.toLowerCase().includes(query) ||
+        task.description?.toLowerCase().includes(query)
+      );
+    }
+    return true;
+  });
+};
+
+// 우선순위별 할일 개수
+export const selectTaskCountByPriority = (state: TaskStore) => {
+  return state.tasks.reduce((acc, task) => {
+    acc[task.priority] = (acc[task.priority] || 0) + 1;
+    return acc;
+  }, {} as Record<TaskPriority, number>);
+};
+
+// 사용
+import { selectFilteredTasks } from "@/store/selectors/taskSelectors";
+
+const filteredTasks = useTaskStore(selectFilteredTasks);
+```
+
+## Store 분리 전략
+
+### 1. Feature별 Store 분리
+
+```typescript
+// src/store/index.ts
+export { useTaskStore } from "./taskSlice";
+export { useCalendarStore } from "./calendarSlice";
+export { useEmailStore } from "./emailSlice";
+export { useNotificationStore } from "./notificationSlice";
+export { useUIStore } from "./uiSlice";
+```
+
+### 2. Combined Store (필요시)
+
+```typescript
+// src/store/combinedStore.ts
+import { create } from "zustand";
+import { createAuthSlice, AuthSlice } from "./slices/authSlice";
+import { createTaskSlice, TaskSlice } from "./slices/taskSlice";
+
+type CombinedStore = AuthSlice & TaskSlice;
+
+export const useCombinedStore = create<CombinedStore>()((...a) => ({
+  ...createAuthSlice(...a),
+  ...createTaskSlice(...a),
+}));
+```
+
+## 미들웨어 활용
+
+### 1. Logger Middleware (개발 환경)
+
+```typescript
+// src/store/middleware/logger.ts
+import { StateCreator, StoreMutatorIdentifier } from "zustand";
+
+type Logger = <
+  T,
+  Mps extends [StoreMutatorIdentifier, unknown][] = [],
+  Mcs extends [StoreMutatorIdentifier, unknown][] = []
+>(
+  f: StateCreator<T, Mps, Mcs>,
+  name?: string
+) => StateCreator<T, Mps, Mcs>;
+
+export const logger: Logger = (f, name) => (set, get, store) => {
+  const loggedSet: typeof set = (...args) => {
+    console.group(`[${name || "Store"}] State Update`);
+    console.log("Previous State:", get());
+    set(...args);
+    console.log("Next State:", get());
+    console.groupEnd();
+  };
+
+  return f(loggedSet, get, store);
+};
+
+// 사용
+export const useTaskStore = create<TaskStore>()(
+  logger(
+    devtools(
+      (set) => ({
+        // ...
+      }),
+      { name: "TaskStore" }
+    ),
+    "TaskStore"
+  )
+);
+```
+
+### 2. ImmerMiddleware (불변성 관리)
+
+```typescript
+import { create } from "zustand";
+import { immer } from "zustand/middleware/immer";
+
+export const useTaskStore = create<TaskStore>()(
+  immer((set) => ({
+    tasks: [],
+
+    // Immer를 사용하면 불변성 신경 쓸 필요 없음
+    updateTask: (id, data) =>
+      set((state) => {
+        const task = state.tasks.find((t) => t.id === id);
+        if (task) {
+          Object.assign(task, data); // 직접 수정 가능!
+        }
+      }),
+  }))
+);
+```
+
+## 비동기 작업 처리
+
+### 1. Store에서 비동기 액션
+
+```typescript
+// src/store/taskSlice.ts
+import { taskApi } from "@/services/taskApi.service";
+
+export const useTaskStore = create<TaskStore>()(
+  devtools((set, get) => ({
+    tasks: [],
+    loading: false,
+    error: null,
+
+    // 비동기 액션
+    fetchTasks: async (userId: string) => {
+      set({ loading: true, error: null });
+
+      try {
+        const tasks = await taskApi.listTasks({ userId });
+        set({ tasks, loading: false });
+      } catch (error) {
+        set({
+          error: error instanceof Error ? error.message : "할일 로드 실패",
+          loading: false,
+        });
+      }
+    },
+
+    createTaskAsync: async (data: CreateTaskDto) => {
+      try {
+        const newTask = await taskApi.createTask(data);
+        set((state) => ({ tasks: [newTask, ...state.tasks] }));
+        return newTask;
+      } catch (error) {
+        throw error;
+      }
+    },
+
+    updateTaskAsync: async (id: string, data: UpdateTaskDto) => {
+      try {
+        const updated = await taskApi.updateTask(id, data);
+        set((state) => ({
+          tasks: state.tasks.map((task) => (task.id === id ? updated : task)),
+        }));
+        return updated;
+      } catch (error) {
+        throw error;
+      }
+    },
+  }))
+);
+```
+
+### 2. 컴포넌트에서 사용
+
+```typescript
+export function TaskForm() {
+  const createTaskAsync = useTaskStore((state) => state.createTaskAsync);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (data: CreateTaskDto) => {
+    setSubmitting(true);
+
+    try {
+      await createTaskAsync(data);
+      alert("할일이 생성되었습니다");
+    } catch (error) {
+      alert("할일 생성에 실패했습니다");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        handleSubmit(formData);
+      }}
+    >
+      {/* 폼 필드 */}
+      <button type="submit" disabled={submitting}>
+        {submitting ? "생성 중..." : "할일 추가"}
+      </button>
+    </form>
+  );
+}
+```
+
+## Store 테스트
+
+```typescript
+// src/store/__tests__/taskSlice.test.ts
+import { renderHook, act } from "@testing-library/react";
+import { useTaskStore } from "../taskSlice";
+
+describe("TaskStore", () => {
+  beforeEach(() => {
+    // 각 테스트 전에 store 초기화
+    useTaskStore.setState({
+      tasks: [],
+      selectedTask: null,
+      filters: {},
+    });
+  });
+
+  it("should add task", () => {
+    const { result } = renderHook(() => useTaskStore());
+
+    const newTask = {
+      id: "task-1",
+      title: "테스트 할일",
+      status: "NOT_STARTED",
+    };
+
+    act(() => {
+      result.current.addTask(newTask);
+    });
+
+    expect(result.current.tasks).toHaveLength(1);
+    expect(result.current.tasks[0]).toEqual(newTask);
+  });
+
+  it("should update task", () => {
+    const { result } = renderHook(() => useTaskStore());
+
+    const task = { id: "task-1", title: "원본" };
+
+    act(() => {
+      result.current.addTask(task);
+      result.current.updateTask("task-1", { title: "수정됨" });
+    });
+
+    expect(result.current.tasks[0].title).toBe("수정됨");
+  });
+});
+```

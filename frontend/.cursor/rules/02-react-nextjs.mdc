@@ -1,0 +1,576 @@
+---
+alwaysApply: false
+---
+
+priority: "MEDIUM",
+dueDate: null,
+});
+
+const handleInputChange = (field: keyof TaskFormState, value: any) => {
+setFormData((prev) => ({ ...prev, [field]: value }));
+};
+
+````
+
+### 2. useEffect
+
+**의존성 배열 정확히 지정**
+
+```typescript
+// ✅ 좋은 예: 필요한 의존성만 포함
+useEffect(() => {
+  fetchTasks(userId);
+}, [userId]); // userId가 변경될 때만 실행
+
+// ❌ 나쁜 예: 불필요한 의존성
+useEffect(() => {
+  fetchTasks(userId);
+}, [userId, tasks]); // tasks가 변경될 때마다 불필요하게 실행
+````
+
+**cleanup 함수 사용**
+
+```typescript
+// ✅ 좋은 예: cleanup으로 메모리 누수 방지
+useEffect(() => {
+  const controller = new AbortController();
+
+  const fetchData = async () => {
+    try {
+      const response = await fetch("/api/tasks", {
+        signal: controller.signal,
+      });
+      const data = await response.json();
+      setTasks(data);
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        console.error(error);
+      }
+    }
+  };
+
+  fetchData();
+
+  return () => {
+    controller.abort(); // 컴포넌트 언마운트 시 요청 취소
+  };
+}, []);
+```
+
+**여러 useEffect로 관심사 분리**
+
+```typescript
+// ✅ 좋은 예: 관심사별로 분리
+function TaskDetail({ taskId }: TaskDetailProps) {
+  // 할일 데이터 로드
+  useEffect(() => {
+    fetchTask(taskId);
+  }, [taskId]);
+
+  // 페이지 제목 업데이트
+  useEffect(() => {
+    document.title = `할일: ${task?.title || "로딩 중..."}`;
+  }, [task?.title]);
+
+  // 실시간 업데이트 구독
+  useEffect(() => {
+    const unsubscribe = subscribeToTaskUpdates(taskId);
+    return unsubscribe;
+  }, [taskId]);
+}
+```
+
+### 3. useMemo
+
+**비용이 큰 연산만 메모이제이션**
+
+```typescript
+// ✅ 좋은 예: 복잡한 계산 결과 캐싱
+function TaskList({ tasks }: TaskListProps) {
+  const sortedAndFilteredTasks = useMemo(() => {
+    return tasks
+      .filter((task) => task.status !== "COMPLETED")
+      .sort((a, b) => {
+        // 복잡한 정렬 로직
+        return priorityOrder[a.priority] - priorityOrder[b.priority];
+      });
+  }, [tasks]); // tasks가 변경될 때만 재계산
+
+  return (
+    <div>
+      {sortedAndFilteredTasks.map((task) => (
+        <TaskCard key={task.id} task={task} />
+      ))}
+    </div>
+  );
+}
+
+// ❌ 나쁜 예: 간단한 연산에 useMemo 사용
+const title = useMemo(() => task.title.toUpperCase(), [task.title]);
+// 그냥 const title = task.title.toUpperCase(); 사용
+```
+
+### 4. useCallback
+
+**자식 컴포넌트에 전달하는 함수만 메모이제이션**
+
+```typescript
+// ✅ 좋은 예: 자식에게 전달하는 함수
+function TaskList() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+
+  const handleTaskDelete = useCallback((taskId: string) => {
+    setTasks((prev) => prev.filter((task) => task.id !== taskId));
+  }, []); // 의존성 없음
+
+  const handleTaskUpdate = useCallback(
+    (taskId: string, data: UpdateTaskDto) => {
+      setTasks((prev) =>
+        prev.map((task) => (task.id === taskId ? { ...task, ...data } : task))
+      );
+    },
+    []
+  ); // 의존성 없음
+
+  return (
+    <div>
+      {tasks.map((task) => (
+        <TaskCard
+          key={task.id}
+          task={task}
+          onDelete={handleTaskDelete} // 메모이제이션된 함수 전달
+          onUpdate={handleTaskUpdate}
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+## 커스텀 훅 작성
+
+### 1. 기본 구조
+
+```typescript
+// src/hooks/useTasks.ts
+import { useState, useEffect, useCallback } from "react";
+import { taskApi } from "@/services/taskApi.service";
+import type { Task, CreateTaskDto, UpdateTaskDto } from "@/types";
+
+interface UseTasksReturn {
+  tasks: Task[];
+  loading: boolean;
+  error: string | null;
+  createTask: (data: CreateTaskDto) => Promise<void>;
+  updateTask: (id: string, data: UpdateTaskDto) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
+  refetch: () => Promise<void>;
+}
+
+export function useTasks(userId?: string): UseTasksReturn {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchTasks = useCallback(async () => {
+    if (!userId) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const data = await taskApi.listTasks({ userId });
+      setTasks(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "할일 로드 실패");
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  const createTask = useCallback(async (data: CreateTaskDto) => {
+    try {
+      const newTask = await taskApi.createTask(data);
+      setTasks((prev) => [newTask, ...prev]);
+    } catch (err) {
+      throw new Error("할일 생성 실패");
+    }
+  }, []);
+
+  const updateTask = useCallback(async (id: string, data: UpdateTaskDto) => {
+    try {
+      const updated = await taskApi.updateTask(id, data);
+      setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
+    } catch (err) {
+      throw new Error("할일 업데이트 실패");
+    }
+  }, []);
+
+  const deleteTask = useCallback(async (id: string) => {
+    try {
+      await taskApi.deleteTask(id);
+      setTasks((prev) => prev.filter((task) => task.id !== id));
+    } catch (err) {
+      throw new Error("할일 삭제 실패");
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTasks();
+  }, [fetchTasks]);
+
+  return {
+    tasks,
+    loading,
+    error,
+    createTask,
+    updateTask,
+    deleteTask,
+    refetch: fetchTasks,
+  };
+}
+```
+
+### 2. 사용 예제
+
+```typescript
+// src/components/tasks/TaskList.tsx
+import { useTasks } from "@/hooks/useTasks";
+
+export function TaskList() {
+  const { tasks, loading, error, deleteTask } = useTasks(userId);
+
+  const handleDelete = async (taskId: string) => {
+    if (confirm("정말 삭제하시겠습니까?")) {
+      try {
+        await deleteTask(taskId);
+      } catch (error) {
+        alert("삭제에 실패했습니다");
+      }
+    }
+  };
+
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorMessage message={error} />;
+
+  return (
+    <div>
+      {tasks.map((task) => (
+        <TaskCard
+          key={task.id}
+          task={task}
+          onDelete={() => handleDelete(task.id)}
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+## Next.js App Router 패턴
+
+### 1. Server Components vs Client Components
+
+**Server Component (기본)**
+
+```typescript
+// src/app/(dashboard)/tasks/page.tsx
+// "use client" 없음 = Server Component
+
+import { TaskList } from "@/components/tasks/TaskList";
+
+// 서버에서 데이터 fetch
+async function getTasks() {
+  const res = await fetch("http://localhost:3001/api/tasks", {
+    cache: "no-store", // 항상 최신 데이터
+  });
+  return res.json();
+}
+
+export default async function TasksPage() {
+  const tasks = await getTasks();
+
+  return (
+    <div className="container mx-auto py-6">
+      <h1 className="text-2xl font-bold mb-6">할일 목록</h1>
+      <TaskList initialTasks={tasks} />
+    </div>
+  );
+}
+```
+
+**Client Component (상호작용 필요)**
+
+```typescript
+// src/components/tasks/TaskList.tsx
+"use client"; // 클라이언트 컴포넌트 명시
+
+import { useState } from "react";
+import type { Task } from "@/types";
+
+interface TaskListProps {
+  initialTasks: Task[];
+}
+
+export function TaskList({ initialTasks }: TaskListProps) {
+  const [tasks, setTasks] = useState(initialTasks);
+
+  const handleDelete = (id: string) => {
+    setTasks((prev) => prev.filter((task) => task.id !== id));
+  };
+
+  return (
+    <div>
+      {tasks.map((task) => (
+        <TaskCard
+          key={task.id}
+          task={task}
+          onDelete={() => handleDelete(task.id)}
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+### 2. Data Fetching
+
+**Server에서 Fetch (권장)**
+
+```typescript
+// src/app/(dashboard)/calendar/page.tsx
+
+async function getCalendarData(year: number, month: number) {
+  const res = await fetch(
+    `http://localhost:3001/api/calendar/month/${year}/${month}`,
+    {
+      next: { revalidate: 60 }, // 60초마다 재검증
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error("Failed to fetch calendar data");
+  }
+
+  return res.json();
+}
+
+export default async function CalendarPage({
+  searchParams,
+}: {
+  searchParams: { year?: string; month?: string };
+}) {
+  const year = Number(searchParams.year) || new Date().getFullYear();
+  const month = Number(searchParams.month) || new Date().getMonth() + 1;
+
+  const calendarData = await getCalendarData(year, month);
+
+  return <CalendarView data={calendarData} />;
+}
+```
+
+**Client에서 Fetch (필요한 경우만)**
+
+```typescript
+// src/components/tasks/TaskDetail.tsx
+"use client";
+
+import { useEffect, useState } from "react";
+import { taskApi } from "@/services/taskApi.service";
+
+export function TaskDetail({ taskId }: { taskId: string }) {
+  const [task, setTask] = useState<Task | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchTask() {
+      try {
+        const data = await taskApi.getTaskById(taskId);
+        setTask(data);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchTask();
+  }, [taskId]);
+
+  if (loading) return <LoadingSpinner />;
+  if (!task) return <div>할일을 찾을 수 없습니다</div>;
+
+  return <div>{task.title}</div>;
+}
+```
+
+### 3. Loading 및 Error 처리
+
+**loading.tsx**
+
+```typescript
+// src/app/(dashboard)/tasks/loading.tsx
+export default function TasksLoading() {
+  return (
+    <div className="container mx-auto py-6">
+      <div className="animate-pulse">
+        <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-24 bg-gray-200 rounded"></div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+**error.tsx**
+
+```typescript
+// src/app/(dashboard)/tasks/error.tsx
+"use client";
+
+import { useEffect } from "react";
+
+export default function TasksError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    console.error("Tasks page error:", error);
+  }, [error]);
+
+  return (
+    <div className="container mx-auto py-6">
+      <div className="text-center">
+        <h2 className="text-2xl font-bold text-red-600 mb-4">
+          오류가 발생했습니다
+        </h2>
+        <p className="text-gray-600 mb-6">{error.message}</p>
+        <button
+          onClick={reset}
+          className="px-4 py-2 bg-blue-600 text-white rounded"
+        >
+          다시 시도
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+### 4. Route Groups 활용
+
+```
+app/
+├── (dashboard)/           # 대시보드 레이아웃
+│   ├── layout.tsx         # 대시보드 공통 레이아웃
+│   ├── tasks/
+│   │   └── page.tsx
+│   └── calendar/
+│       └── page.tsx
+```
+
+**대시보드 레이아웃**
+
+```typescript
+// src/app/(dashboard)/layout.tsx
+import { Sidebar } from "@/components/layout/Sidebar";
+import { Header } from "@/components/layout/Header";
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex h-screen">
+      <Sidebar />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <Header />
+        <main className="flex-1 overflow-y-auto bg-gray-50">{children}</main>
+      </div>
+    </div>
+  );
+}
+```
+
+## 성능 최적화
+
+### 1. React.memo
+
+**Props가 변경되지 않으면 리렌더링 방지**
+
+```typescript
+// src/components/tasks/TaskCard.tsx
+import { memo } from "react";
+
+interface TaskCardProps {
+  task: Task;
+  onEdit: (id: string) => void;
+  onDelete: (id: string) => void;
+}
+
+export const TaskCard = memo(function TaskCard({
+  task,
+  onEdit,
+  onDelete,
+}: TaskCardProps) {
+  return (
+    <div className="border rounded p-4">
+      <h3>{task.title}</h3>
+      <p>{task.description}</p>
+      <button onClick={() => onEdit(task.id)}>수정</button>
+      <button onClick={() => onDelete(task.id)}>삭제</button>
+    </div>
+  );
+});
+```
+
+### 2. Dynamic Import (Code Splitting)
+
+```typescript
+// src/app/(dashboard)/tasks/page.tsx
+import dynamic from "next/dynamic";
+
+// 큰 컴포넌트는 동적 import
+const TaskModal = dynamic(() => import("@/components/tasks/TaskModal"), {
+  loading: () => <p>로딩 중...</p>,
+  ssr: false, // 클라이언트에서만 렌더링
+});
+
+export default function TasksPage() {
+  const [showModal, setShowModal] = useState(false);
+
+  return (
+    <div>
+      <button onClick={() => setShowModal(true)}>할일 추가</button>
+      {showModal && <TaskModal onClose={() => setShowModal(false)} />}
+    </div>
+  );
+}
+```
+
+### 3. Image 최적화
+
+```typescript
+import Image from "next/image";
+
+export function UserAvatar({ src, alt }: { src: string; alt: string }) {
+  return (
+    <Image
+      src={src}
+      alt={alt}
+      width={40}
+      height={40}
+      className="rounded-full"
+      priority={false} // LCP 이미지만 true
+    />
+  );
+}
+```

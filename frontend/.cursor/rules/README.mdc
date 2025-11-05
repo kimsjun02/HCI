@@ -1,0 +1,193 @@
+---
+alwaysApply: false
+---
+
+# 프론트엔드 개발 규칙 (Coding Rules)
+
+이 디렉토리는 스마트 일정 관리 시스템 프론트엔드 개발을 위한 코딩 규칙과 가이드라인을 포함하고 있습니다.
+
+## 📋 규칙 파일 목록
+
+### 01. 프로젝트 구조 및 컴포넌트 설계
+
+**파일**: `01-project-structure.mdc`
+
+다음 내용을 포함합니다:
+
+- 프로젝트 폴더 구조
+- 컴포넌트 파일 구조 및 명명 규칙
+- TypeScript 컨벤션
+- 환경 변수 관리
+- Import 순서
+- 상수 관리
+- Git 커밋 메시지 규칙
+
+### 02. React 및 Next.js
+
+**파일**: `02-react-nextjs.mdc`
+
+다음 내용을 포함합니다:
+
+- React 컴포넌트 작성 패턴
+- Next.js App Router 사용법
+- 서버 컴포넌트 vs 클라이언트 컴포넌트
+- 데이터 페칭 전략
+- 커스텀 훅 작성
+- Context API 사용
+- 접근성 (a11y)
+
+### 03. 상태 관리
+
+**파일**: `03-state-management.mdc`
+
+다음 내용을 포함합니다:
+
+- Zustand Store 설계
+- 전역 상태 관리
+- 로컬 컴포넌트 상태
+- 상태 업데이트 패턴
+- Store 분리 전략
+
+### 04. API 및 데이터 페칭
+
+**파일**: `04-api-data-fetching.mdc`
+
+다음 내용을 포함합니다:
+
+- API 클라이언트 설정
+- 데이터 페칭 전략
+- 에러 핸들링
+- 로딩 상태 관리
+- WebSocket 통신
+
+### 05. UI 스타일링
+
+**파일**: `05-ui-styling.mdc`
+
+다음 내용을 포함합니다:
+
+- Tailwind CSS 사용 규칙
+- 반응형 디자인
+- 컴포넌트 스타일링
+- 테마 관리 (다크모드)
+- 디자인 토큰
+
+## 🚀 빠른 시작
+
+### 1. 프로젝트 초기 설정
+
+```bash
+# 의존성 설치
+npm install
+
+# 환경 변수 설정
+cp .env.example .env.local
+# .env.local 파일을 열어 필요한 값들을 설정하세요
+```
+
+### 2. 개발 서버 실행
+
+```bash
+npm run dev
+```
+
+## 📦 주요 기술 스택
+
+- **프레임워크**: Next.js 14 (App Router)
+- **언어**: TypeScript
+- **UI 라이브러리**: React 18
+- **스타일링**: Tailwind CSS
+- **상태 관리**: Zustand
+- **데이터 페칭**: Native Fetch API / WebSocket
+- **폼 검증**: React Hook Form + Zod
+
+## 🔑 핵심 원칙
+
+### 1. 타입 안전성
+
+- 모든 컴포넌트 props에 타입 지정
+- `any` 사용 금지
+- 제네릭 적극 활용
+
+### 2. 컴포넌트 설계
+
+- 단일 책임 원칙
+- 재사용 가능한 컴포넌트
+- Props drilling 최소화
+- Presentational vs Container 분리
+
+### 3. 성능 최적화
+
+- 불필요한 리렌더링 방지
+- 메모이제이션 활용 (useMemo, useCallback)
+- 코드 스플리팅
+- 이미지 최적화
+
+### 4. 접근성
+
+- 시맨틱 HTML 사용
+- ARIA 속성 적절히 사용
+- 키보드 네비게이션 지원
+
+### 5. 코드 품질
+
+- ESLint, Prettier 준수
+- 컴포넌트는 200줄 이내
+- 명확한 변수/함수명 사용
+
+## 📖 규칙 적용 예제
+
+### 좋은 컴포넌트 예제
+
+```typescript
+// src/components/tasks/TaskCard.tsx
+interface TaskCardProps {
+  task: Task;
+  onEdit?: (id: string) => void;
+  onDelete?: (id: string) => void;
+}
+
+export function TaskCard({ task, onEdit, onDelete }: TaskCardProps) {
+  return (
+    <div className="rounded-lg border p-4 hover:shadow-md transition-shadow">
+      <h3 className="text-lg font-semibold">{task.title}</h3>
+      <p className="text-sm text-gray-600">{task.description}</p>
+
+      <div className="mt-4 flex gap-2">
+        {onEdit && (
+          <button
+            onClick={() => onEdit(task.id)}
+            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            수정
+          </button>
+        )}
+        {onDelete && (
+          <button
+            onClick={() => onDelete(task.id)}
+            className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+          >
+            삭제
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+## 🤝 기여 가이드
+
+1. 새로운 기능 개발 전 해당 규칙 파일 확인
+2. 규칙을 따라 코드 작성
+3. Lint 검사 통과
+4. Pull Request 생성
+
+## 📞 문의
+
+규칙에 대한 질문이나 제안사항이 있다면 팀 리드에게 문의하세요.
+
+---
+
+**마지막 업데이트**: 2025-11-04
+**버전**: 1.0.0
